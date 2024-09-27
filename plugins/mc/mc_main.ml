@@ -225,6 +225,10 @@ module Spec = struct
   let only_one =
     let doc = "Stop after the first instruction is decoded" in
     Command.flag ~doc "only-one"
+  
+  let repeat =
+    let doc = "Repeatedly read instructions when reading from stdin" in
+    Command.flag ~doc "repeat"
 
   let stop_on_error = Command.flag "stop-on-errors"
       ~doc:"Stop disassembling on the first error and report it"
@@ -597,25 +601,52 @@ let () = Extension.Command.(begin
             $target $encoding
             $triple $cpu $backend
             $bits $order
-            $base $only_one $stop_on_error $input $outputs)
+            $base $only_one $stop_on_error $repeat $input $outputs)
   end) @@ fun arch
     target encoding
     triple cpu backend
     bits order
-    base only_one stop_on_error input outputs _ctxt ->
+    base only_one stop_on_error repeat input outputs _ctxt ->
   validate_formats outputs >>= fun () ->
   parse_arch arch target encoding triple cpu backend bits order >>= fun arch ->
-  read_input input >>= fun data ->
   parse_base arch base >>= fun base ->
-  create_memory arch data base >>= fun mem ->
   create_disassembler arch >>= fun dis ->
   let formats = formats outputs in
-  run ~only_one ~stop_on_error dis arch mem formats >>= fun bytes ->
+  let rec process_loop () =
+    read_input input >>= fun data ->
+
+    if String.length data = 0 then
+      Ok ()
+    else
+      create_memory arch data base >>= fun mem ->
+
+      run ~only_one ~stop_on_error dis arch mem formats >>= fun bytes -> begin
+              Printf.printf "END\n";
+              flush stdout;
+              let remaining_bytes = String.length data - bytes in
+              match remaining_bytes with
+              | 0 -> if repeat then
+                process_loop ()
+              else
+                Ok()
+              | n when only_one -> if repeat then
+                process_loop ()
+              else
+                Ok()
+              | n -> if repeat then begin
+                process_loop ()
+              end else 
+                fail (Trailing_data n)
+      end
+  in
+
+  (* Start the loop to repeatedly read and process input *)
+  process_loop () >>= fun () ->
+  (*  run ~only_one ~stop_on_error dis arch mem formats >>= fun bytes -> *)
   Dis.close dis;
-  match String.length data - bytes with
-  | 0 -> Ok ()
-  | _ when only_one -> Ok ()
-  | n -> fail (Trailing_data n)
+
+  Ok()
+  
 
 let () = Extension.Command.(begin
     declare ~doc:objdump_man "objdump"
