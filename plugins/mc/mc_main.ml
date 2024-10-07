@@ -619,25 +619,31 @@ let () = Extension.Command.(begin
       Ok ()
     else
       create_memory arch data base >>= fun mem ->
-
-      run ~only_one ~stop_on_error dis arch mem formats >>= fun bytes -> begin
-              Printf.printf "END\n";
-              flush stdout;
-              let remaining_bytes = String.length data - bytes in
-              match remaining_bytes with
-              | 0 -> if repeat then
-                process_loop ()
-              else
-                Ok()
-              | n when only_one -> if repeat then
-                process_loop ()
-              else
-                Ok()
-              | n -> if repeat then begin
-                process_loop ()
-              end else 
-                fail (Trailing_data n)
-      end
+        match run ~only_one ~stop_on_error dis arch mem formats with
+        | Ok bytes -> begin
+          Printf.printf "END\n";
+          flush stdout;
+          let remaining_bytes = String.length data - bytes in
+          match remaining_bytes with
+          | 0 -> if repeat then
+            process_loop ()
+          else
+            Ok()
+          | n when only_one -> if repeat then
+            process_loop ()
+          else
+            Ok()
+          | n -> if repeat then begin
+            process_loop ()
+          end else
+            fail (Trailing_data n)
+        end
+        | Error err ->
+          let error_str = Format.asprintf "%a" Bap_main.Extension.Error.pp err in
+            Printf.printf "Error: <<< %s >>>\n" error_str;
+          Printf.printf "END\n";
+          flush stdout;
+          if repeat then process_loop () else Ok()
   in
 
   (* Start the loop to repeatedly read and process input *)
